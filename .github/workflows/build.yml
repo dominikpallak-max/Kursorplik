@@ -33,6 +33,179 @@ jobs:
           sed -i "s|^yarn_mappings=.*|yarn_mappings=$YARN|" gradle.properties
           sed -i "s|^fabric_version=.*|fabric_version=$FABRIC|" gradle.properties
 
+      - name: Utwórz pliki moda
+        run: |
+          mkdir -p src/main/java/snipevoid/kursor src/main/resources
+
+          cat > src/main/resources/fabric.mod.json <<'EOF'
+          {
+            "schemaVersion": 1,
+            "id": "kursorplik",
+            "version": "1.0.0",
+            "name": "Kursor Plik",
+            "description": "/kursorplik - pokazuje nazwe bloku/itemu/hologramu z pliku jezykowego po kliknieciu.",
+            "environment": "client",
+            "entrypoints": { "client": ["snipevoid.kursor.KursorPlikMod"] },
+            "depends": { "fabricloader": ">=0.16.0", "minecraft": "~1.21.11", "java": ">=21", "fabric-api": "*" }
+          }
+          EOF
+
+          cat > src/main/java/snipevoid/kursor/KursorPlikMod.java <<'EOF'
+          package snipevoid.kursor;
+
+          import net.fabricmc.api.ClientModInitializer;
+
+          public class KursorPlikMod implements ClientModInitializer {
+              @Override
+              public void onInitializeClient() {
+                  KursorPlik.init();
+              }
+          }
+          EOF
+
+          cat > src/main/java/snipevoid/kursor/KursorPlikScreen.java <<'EOF'
+          package snipevoid.kursor;
+
+          import net.minecraft.client.gui.screen.Screen;
+          import net.minecraft.client.gui.widget.ButtonWidget;
+          import net.minecraft.text.Text;
+
+          public class KursorPlikScreen extends Screen {
+              private final Screen parent;
+              private ButtonWidget toggleButton;
+
+              public KursorPlikScreen(Screen parent) {
+                  super(Text.literal("Kursor plik"));
+                  this.parent = parent;
+              }
+
+              @Override
+              protected void init() {
+                  int cx = this.width / 2;
+                  int cy = this.height / 2;
+
+                  this.toggleButton = ButtonWidget.builder(label(), b -> {
+                      KursorPlik.enabled = !KursorPlik.enabled;
+                      b.setMessage(label());
+                  }).dimensions(cx - 100, cy - 10, 200, 20).build();
+                  this.addDrawableChild(this.toggleButton);
+
+                  this.addDrawableChild(ButtonWidget.builder(Text.literal("Zamknij"), b -> this.close())
+                          .dimensions(cx - 100, cy + 15, 200, 20).build());
+              }
+
+              private static Text label() {
+                  return Text.literal("Kursor plik: " + (KursorPlik.enabled ? "WŁĄCZONY" : "WYŁĄCZONY"));
+              }
+
+              @Override
+              public void close() {
+                  this.client.setScreen(parent);
+              }
+
+              @Override
+              public boolean shouldPause() {
+                  return false;
+              }
+          }
+          EOF
+
+          cat > src/main/java/snipevoid/kursor/KursorPlik.java <<'EOF'
+          package snipevoid.kursor;
+
+          import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+          import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
+          import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
+          import net.fabricmc.fabric.api.event.player.UseBlockCallback;
+          import net.fabricmc.fabric.api.event.player.UseEntityCallback;
+          import net.minecraft.block.Block;
+          import net.minecraft.client.MinecraftClient;
+          import net.minecraft.entity.Entity;
+          import net.minecraft.entity.ItemEntity;
+          import net.minecraft.entity.decoration.ArmorStandEntity;
+          import net.minecraft.item.Item;
+          import net.minecraft.item.ItemStack;
+          import net.minecraft.registry.Registries;
+          import net.minecraft.text.Text;
+          import net.minecraft.util.ActionResult;
+          import net.minecraft.util.Hand;
+          import net.minecraft.util.math.BlockPos;
+          import net.minecraft.world.World;
+
+          public final class KursorPlik {
+              public static boolean enabled = false;
+
+              private KursorPlik() {}
+
+              public static void init() {
+                  ClientCommandRegistrationCallback.EVENT.register((dispatcher, access) ->
+                          dispatcher.register(ClientCommandManager.literal("kursorplik").executes(ctx -> {
+                              MinecraftClient client = MinecraftClient.getInstance();
+                              client.execute(() -> client.setScreen(new KursorPlikScreen(client.currentScreen)));
+                              return 1;
+                          }))
+                  );
+
+                  UseBlockCallback.EVENT.register((player, world, hand, hit) -> {
+                      if (enabled && hand == Hand.MAIN_HAND && world.isClient()) {
+                          showBlock(world, hit.getBlockPos());
+                      }
+                      return ActionResult.PASS;
+                  });
+
+                  AttackEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
+                      if (enabled && hand == Hand.MAIN_HAND && world.isClient()) {
+                          showEntity(entity);
+                      }
+                      return ActionResult.PASS;
+                  });
+                  UseEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
+                      if (enabled && hand == Hand.MAIN_HAND && world.isClient()) {
+                          showEntity(entity);
+                      }
+                      return ActionResult.PASS;
+                  });
+              }
+
+              private static void showBlock(World world, BlockPos pos) {
+                  Block block = world.getBlockState(pos).getBlock();
+                  String id = Registries.BLOCK.getId(block).toString();
+                  String key = block.getTranslationKey();
+                  send("§6Blok: §f" + id + " §7| klucz: §f" + key);
+              }
+
+              private static void showEntity(Entity entity) {
+                  if (entity instanceof ItemEntity itemEntity) {
+                      ItemStack stack = itemEntity.getStack();
+                      Item item = stack.getItem();
+                      String id = Registries.ITEM.getId(item).toString();
+                      String key = item.getTranslationKey();
+                      send("§6Item: §f" + id + " §7| klucz: §f" + key + " §7x" + stack.getCount());
+                      return;
+                  }
+
+                  String typeId = Registries.ENTITY_TYPE.getId(entity.getType()).toString();
+                  String typeKey = entity.getType().getTranslationKey();
+                  String custom = entity.hasCustomName() && entity.getCustomName() != null
+                          ? entity.getCustomName().getString()
+                          : null;
+
+                  StringBuilder sb = new StringBuilder("§6Encja: §f").append(typeId)
+                          .append(" §7| klucz: §f").append(typeKey);
+                  if (custom != null) sb.append(" §7| nazwa: §f").append(custom);
+                  if (entity instanceof ArmorStandEntity) sb.append(" §8(hologram)");
+                  send(sb.toString());
+              }
+
+              private static void send(String msg) {
+                  MinecraftClient client = MinecraftClient.getInstance();
+                  if (client.player != null) {
+                      client.player.sendMessage(Text.literal(msg), false);
+                  }
+              }
+          }
+          EOF
+
       - name: Zbuduj mod
         run: gradle build
 
