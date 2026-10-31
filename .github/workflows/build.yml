@@ -24,6 +24,7 @@ jobs:
           gradle-version: 9.1.0
 
       - name: Pobierz najnowsze wersje Yarn i Fabric API dla 1.21.11
+        working-directory: kursorplik-mod
         run: |
           YARN=$(curl -s https://meta.fabricmc.net/v2/versions/yarn/1.21.11 | jq -r '.[0].version')
           FABRIC=$(curl -s https://maven.fabricmc.net/net/fabricmc/fabric-api/fabric-api/maven-metadata.xml \
@@ -34,10 +35,11 @@ jobs:
           sed -i "s|^fabric_version=.*|fabric_version=$FABRIC|" gradle.properties
 
       - name: Zbuduj mod
+        working-directory: kursorplik-mod
         run: gradle build
 
       - name: Wgraj jar
         uses: actions/upload-artifact@v4
         with:
           name: kursorplik
-          path: build/libs/kursorplik-1.0.0.jar
+          path: kursorplik-mod/build/libs/kursorplik-1.0.0.jar
